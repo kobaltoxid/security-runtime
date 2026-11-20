@@ -31,7 +31,7 @@ python3 triage.py .state/go-pilot --db .state/triage.sqlite3
 
 The worker returns a JSON verdict with evidence references or an `insufficient_evidence` result. A repeated invocation with the same input and model returns the stored verdict. Keep the original scan artifacts for the evidence behind the review.
 
-The runtime selects which records each evidence request may see and validates the model's proposed action before applying it. The `claude2` command supplies decisions in separate, tool-disabled calls. The worker stores its own state and uses the SecDepth evidence supplied with the run.
+The runtime selects which records each evidence request may see and validates the model's proposed action before applying it. Each decision comes from a separate model call with tools disabled, and the worker allows at most two evidence requests before a verdict. The worker stores its own state and uses the SecDepth evidence supplied with the run.
 
 ## Runner authentication
 

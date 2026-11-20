@@ -1,0 +1,200 @@
+direction: right
+
+vars: {
+  # Fills sit at the same lightness and saturation so yellow and green read as one family.
+  # Lines and arrows are mid-tones with at least 3:1 contrast on both the light and dark canvas.
+  colors: {
+    owned-light: "#FAECB6"
+    owned-dark: "#5B4315"
+    store-light: "#C9F4D7"
+    store-dark: "#234932"
+    owned-line: "#AD8522"
+    desired: "#228B22"
+    undesired: "#E24942"
+    neutral: "#868D95"
+  }
+  d2-config: {
+    theme-id: 0
+    dark-theme-id: 200
+    # Fills use theme slots so they switch with the viewer's color scheme. Rectangles take
+    # B4 to B6 and cylinders AA4 or AA5 depending on nesting depth; B1 draws unclassed lines.
+    # Shapes nested three or more boundaries deep take the canvas color instead.
+    theme-overrides: {
+      B1: ${colors.neutral}
+      B2: ${colors.neutral}
+      N2: "#4B5563"
+      B3: "#E5E8EB"
+      B4: ${colors.owned-light}
+      B5: ${colors.owned-light}
+      B6: ${colors.owned-light}
+      AA4: ${colors.store-light}
+      AA5: ${colors.store-light}
+    }
+    dark-theme-overrides: {
+      B1: ${colors.neutral}
+      B2: ${colors.neutral}
+      N2: "#C9D1D9"
+      B3: "#3A4148"
+      B4: ${colors.owned-dark}
+      B5: ${colors.owned-dark}
+      B6: ${colors.owned-dark}
+      AA4: ${colors.store-dark}
+      AA5: ${colors.store-dark}
+    }
+  }
+}
+
+classes: {
+  # A component the system owns: the main subject of the diagram. Keep it a rectangle.
+  owned: {
+    style: {
+      font-size: 18
+      stroke: ${colors.owned-line}
+      stroke-width: 2
+      border-radius: 6
+      bold: true
+    }
+  }
+  # Stored data: databases, queues, files, caches.
+  store: {
+    shape: cylinder
+    style: {
+      font-size: 18
+      stroke: ${colors.desired}
+      stroke-width: 2
+      bold: true
+    }
+  }
+  # Something outside the system: a client, service, or third party.
+  external: {
+    style: {
+      font-size: 18
+      fill: transparent
+      stroke: ${colors.neutral}
+      stroke-width: 2
+      stroke-dash: 4
+      border-radius: 6
+      bold: false
+    }
+  }
+  # A person outside the system. A dashed outline makes the icon look broken, so keep it solid.
+  person: {
+    shape: person
+    style: {
+      font-size: 18
+      fill: transparent
+      stroke: ${colors.neutral}
+      stroke-width: 2
+    }
+  }
+  # An ownership or deployment boundary. Its title sits top left so incoming arrows do not cross it.
+  boundary: {
+    label.near: top-left
+    style: {
+      fill: transparent
+      stroke: ${colors.neutral}
+      stroke-width: 1
+      font-size: 16
+      border-radius: 4
+    }
+  }
+  # The desired path: what should happen.
+  flow: {
+    style: {
+      stroke: ${colors.desired}
+      stroke-width: 2
+    }
+  }
+  # A reply, read-back, recovery, or optional side effect.
+  reply: {
+    style: {
+      stroke: ${colors.neutral}
+      stroke-width: 2
+      stroke-dash: 4
+    }
+  }
+  # A structural relationship with no direction, drawn with --.
+  link: {
+    style: {
+      stroke: ${colors.neutral}
+      stroke-width: 1
+    }
+  }
+  # An undesired path: failure, rejection, or error.
+  fail: {
+    style: {
+      stroke: ${colors.undesired}
+      font-color: ${colors.undesired}
+      stroke-width: 2
+      stroke-dash: 4
+      bold: true
+    }
+  }
+  # A state or outcome nobody wants: failure, rejection, dead letter.
+  failed: {
+    style: {
+      fill: transparent
+      stroke: ${colors.undesired}
+      font-color: ${colors.undesired}
+      stroke-width: 2
+      border-radius: 6
+      bold: true
+    }
+  }
+  # Start and end markers for state machines.
+  start: {
+    shape: circle
+    label: ""
+    width: 20
+    style: {
+      fill: ${colors.desired}
+      stroke: ${colors.desired}
+    }
+  }
+  end: {
+    shape: circle
+    label: ""
+    width: 24
+    style: {
+      fill: transparent
+      stroke: ${colors.desired}
+      stroke-width: 6
+    }
+  }
+}
+
+scan: "Scan" {
+  class: owned
+}
+
+reports: "Scan reports" {
+  class: store
+}
+
+triage: "Triage\ntriage.py" {
+  class: owned
+}
+
+model: "Claude" {
+  class: external
+}
+
+verdict: "Verdict\nSQLite" {
+  class: store
+}
+
+scan -> reports: {
+  class: flow
+}
+reports -> triage: flagged {
+  class: flow
+}
+triage -> model: request {
+  class: flow
+}
+model -> triage: action {
+  class: reply
+}
+triage -> verdict: {
+  class: flow
+}

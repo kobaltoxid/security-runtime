@@ -20,7 +20,7 @@ python3 runtime.py --state .state run /path/to/release.tar.gz \
   --stream project-linux-release --revision "$ARTIFACT_DIGEST" --trigger release
 ```
 
-The stream identifies the history being compared. Use a stream per branch or merge request and a separate stream for each release artifact variant. The revision is caller-supplied metadata, so make sure the local input matches it. When the last successful scan was complete, a repeated event with the same trigger and revision reuses that result.
+The stream identifies the history being compared. Use a stream per branch or merge request and a separate stream for each release artifact variant. The revision is caller-supplied metadata, so make sure the local input matches it. When the last successful scan was complete, a repeated event with the same trigger and revision reuses that result. Scheduled runs, including `watch`, always scan again.
 
 ## Run periodically
 
@@ -51,7 +51,7 @@ If scans start competing for worker resources, package the runner and scanners i
 
 floop can review a completed report against explicit criteria, such as whether every coverage gap is explained or which conditional findings need human review. Running that review automatically requires a host that provides worker session controls and evidence. [floop usage](https://github.com/kobaltoxid/floop#use)
 
-See the [security runtime roadmap](security-runtime-roadmap.md) for the planned unattended review loop and its acceptance criteria.
+See the [review loop design](review-loop-design.md) for how scans feed model triage and what the unattended loop adds.
 
 ## Run on GitHub Actions
 
