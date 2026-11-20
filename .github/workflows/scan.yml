@@ -74,8 +74,10 @@ jobs:
             test -f target/go.sum && test ! -L target/go.sum || fail "go.sum is not a regular file"
           fi
           python_bin="$(command -v python3)" || fail "Python 3 is unavailable"
-          # Keep optional package managers and build tools out of this scan.
-          PATH=/dev/null "$python_bin" -I secdepth/skills/secdepth/scripts/scan.py \
+          # SecDepth uses Git for revision metadata. Exclude package managers and build tools.
+          scan_bin="$(mktemp -d "$RUNNER_TEMP/secdepth-bin.XXXXXX")"
+          ln -s "$(command -v git)" "$scan_bin/git"
+          PATH="$scan_bin" "$python_bin" -I secdepth/skills/secdepth/scripts/scan.py \
             "$GITHUB_WORKSPACE/target" \
             --output "$RUNNER_TEMP/secdepth-results" \
             >> "$scan_log" 2>&1
