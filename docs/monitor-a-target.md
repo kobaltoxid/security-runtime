@@ -9,14 +9,14 @@ Use Python 3 on macOS or Linux. Put the `secdepth` and `secpeel` checkouts next 
 From `security-runtime/`, supply a Git commit SHA for a source scan.
 
 ```sh
-python3 runtime.py --state .state run /path/to/checkout \
+python3 main.py scan --state .state /path/to/checkout \
   --stream project-main --revision "$COMMIT_SHA" --trigger push
 ```
 
 For a release, pass the built archive or executable and use its digest as the revision.
 
 ```sh
-python3 runtime.py --state .state run /path/to/release.tar.gz \
+python3 main.py scan --state .state /path/to/release.tar.gz \
   --stream project-linux-release --revision "$ARTIFACT_DIGEST" --trigger release
 ```
 
@@ -26,10 +26,10 @@ If the last successful scan was complete, an event with the same trigger and rev
 
 ## Run periodically
 
-`watch` starts a scan immediately, waits the configured interval after it finishes, then scans the same local path again. Stop it with Ctrl-C. Use `run --trigger scheduled` to let an operating-system scheduler or CI own the cadence.
+`watch` starts a scan immediately, waits the configured interval after it finishes, then scans the same local path again. Stop it with Ctrl-C. Use `scan --trigger scheduled` to let an operating-system scheduler or CI set the cadence.
 
 ```sh
-python3 runtime.py --state .state watch /path/to/checkout \
+python3 main.py watch --state .state /path/to/checkout \
   --stream project-main --interval 3600
 ```
 
@@ -45,7 +45,7 @@ A missing finding describes a difference from the baseline. Verify the reason in
 
 ## Connect CI or Kubernetes
 
-If you use another CI service, start with one repository and call `runtime.py run` from a job. For a push or merge request, pass the checkout for the exact commit and set the trigger to `push` or `merge-request`. For a release, pass the artifact from the build job. Keep the runtime state between jobs so it can compare findings, and save the JSON and HTML reports as CI artifacts.
+If you use another CI service, start with one repository and call `main.py scan` from a job. For a push or merge request, pass the checkout for the exact commit and set the trigger to `push` or `merge-request`. For a release, pass the artifact from the build job. Keep the runtime state between jobs so it can compare findings, and save the JSON and HTML reports as CI artifacts.
 
 GitLab supports rules for push, merge request, tag and scheduled pipelines. [GitLab job rules](https://docs.gitlab.com/ci/jobs/job_rules/)
 

@@ -6,8 +6,6 @@ an HTTP endpoint, or send notifications. A CI/webhook adapter can invoke it.
 """
 import argparse
 import contextlib
-import datetime as dt
-import fcntl
 import json
 import math
 import os
@@ -19,6 +17,9 @@ import sys
 import tempfile
 import time
 
+from runtime_support import exclusive_lock, utc_timestamp
+from scan_reports import scan_history, summarize_scan, validated_report
+
 TRIGGERS = ("push", "merge-request", "release", "scheduled", "manual")
 
 
@@ -26,39 +27,6 @@ def valid_stream(value):
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", value):
         raise argparse.ArgumentTypeError("use 1–128 lowercase letters, digits, '.', '_' or '-' and start alphanumeric")
     return value
-
-
-def report_signature(report):
-    result = {}
-    for finding in report.get("vulnerabilities", []):
-        result[finding["id"]] = {
-            "applicability": finding.get("applicability"),
-            "components": sorted(finding["affected_component_ids"]),
-            "reachability": finding["exploitability"].get("reachability"),
-            "review": finding["review"].get("needed"),
-            "severity": (finding.get("cvss") or {}).get("severity"),
-            "update_status": finding.get("update_status"),
-            "recommended_target_version": finding.get("recommended_target_version"),
-        }
-    return result
-
-
-def compare(observed, baseline, current, partial):
-    complete = report_signature(baseline or {})
-    old = {**complete, **report_signature(observed or {})}
-    new = report_signature(current or {})
-    added = sorted(set(new) - set(old))
-    changed = sorted(k for k in set(new) & set(old) if new[k] != old[k])
-    missing = sorted(set(complete) - set(new))
-    return {"new": added, "changed": changed, "missing": [] if partial else missing,
-            "missing_suppressed": bool(partial and missing)}
-
-
-@contextlib.contextmanager
-def exclusive(path):
-    with path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
 
 
 def signal_group(process, sig):
@@ -104,41 +72,25 @@ def run_scan(scanner, target, output, timeout, offline, osv_data, cache_dir):
     return code == 0, "exit-%d" % code
 
 
-def read_json(path):
-    return json.loads(path.read_text(encoding="utf-8"))
+def scan_target(args, scanner, output, cache):
+    try:
+        snapshot_lock = (
+            exclusive_lock(args.osv_data / ".security-runtime.lock") if args.osv_data
+            else contextlib.nullcontext()
+        )
+        with snapshot_lock:
+            ok, reason = run_scan(scanner, args.target, output, args.timeout, args.offline, args.osv_data, cache)
+    except KeyboardInterrupt:
+        return None, "interrupted"
+    except OSError as exc:
+        return None, f"setup-failed: {exc}"
 
-
-def scan_history(runs):
-    published = sorted((p for p in runs.iterdir() if p.name.isascii() and p.name.isdecimal()), reverse=True)
-    observed = None
-    complete = None
-    for run in published:
-        summary = read_json(run / "summary.json")
-        if summary["status"] in {"complete", "partial"} and observed is None:
-            observed = summary, read_json(run / "report.json")
-        if summary["status"] == "complete":
-            complete = observed if observed[0] == summary else (summary, read_json(run / "report.json"))
-            break
-    next_sequence = int(published[0].name) + 1 if published else 1
-    return f"{next_sequence:012d}", observed, complete
-
-
-def validated_report(directory):
-    report = read_json(directory / "report.json")
-    if not (directory / "report.html").is_file():
-        raise ValueError("missing HTML report")
-    target = report["report"]["target"]
-    findings = report["vulnerabilities"]
-    if (
-        not isinstance(target["coverage_complete"], bool)
-        or any(not isinstance(target[key], list) for key in ("lookup_failures", "not_queried"))
-        or not isinstance(findings, list)
-    ):
-        raise ValueError("invalid report structure")
-    signature = report_signature(report)
-    if len(signature) != len(findings) or any(not isinstance(key, str) or not key for key in signature):
-        raise ValueError("advisory IDs must be unique nonempty strings")
-    return report
+    if not ok:
+        return None, reason
+    try:
+        return validated_report(output), reason
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return None, f"invalid-report: {exc}"
 
 
 def attempt(args, scanner, state):
@@ -146,7 +98,7 @@ def attempt(args, scanner, state):
     stream_dir = state / stream
     runs = stream_dir / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    with exclusive(stream_dir / ".lock"):
+    with exclusive_lock(stream_dir / ".lock"):
         run_id, observed, baseline = scan_history(runs)
         if args.trigger != "scheduled" and args.revision and observed and observed == baseline:
             previous, _ = observed
@@ -154,80 +106,59 @@ def attempt(args, scanner, state):
                 return {"status": "deduplicated", "run_id": previous["run_id"], "stream": stream,
                         "revision": args.revision, "trigger": args.trigger}
         temporary = pathlib.Path(tempfile.mkdtemp(prefix=".run-", dir=runs))
-        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        started = utc_timestamp()
         cache_dir = stream_dir / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        report = None
-        try:
-            snapshot_lock = exclusive(args.osv_data / ".security-runtime.lock") if args.osv_data else contextlib.nullcontext()
-            with snapshot_lock:
-                ok, reason = run_scan(scanner, args.target, temporary, args.timeout, args.offline, args.osv_data, cache_dir)
-        except KeyboardInterrupt:
-            ok, reason = False, "interrupted"
-        except OSError as exc:
-            ok, reason = False, f"setup-failed: {exc}"
-        if ok:
-            try:
-                report = validated_report(temporary)
-            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-                reason = f"invalid-report: {exc}"
-        target_report = (report or {}).get("report", {}).get("target", {})
-        partial = (not ok or report is None or not target_report.get("coverage_complete", False)
-                   or bool(target_report.get("lookup_failures")) or bool(target_report.get("not_queried"))
-                   or bool(target_report.get("offline")))
-        if report is not None:
-            diff = compare(observed[1] if observed else None, baseline[1] if baseline else None, report, partial)
-            summary = {"status": "partial" if partial else "complete", "reason": reason, "stream": stream,
-                       "trigger": args.trigger, "revision": args.revision,
-                       "started_at": started, "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                       "assessment_complete": not partial, "diff": diff, "coverage_complete": target_report.get("coverage_complete"),
-                       "coverage": target_report.get("coverage"), "lookup_failures": target_report.get("lookup_failures", []),
-                       "unqueried": target_report.get("not_queried", []),
-                       "offline": bool(target_report.get("offline")),
-                       "review_needed": sum(1 for f in report.get("vulnerabilities", []) if (f.get("review") or {}).get("needed"))}
-        else:
-            log_path = temporary / "scan.log"
-            with log_path.open("a", encoding="utf-8") as log:
+        report, reason = scan_target(args, scanner, temporary, cache_dir)
+        if report is None:
+            with (temporary / "scan.log").open("a", encoding="utf-8") as log:
                 log.write(f"Runtime stopped: {reason}\n")
-            summary = {"status": "failed", "reason": reason, "stream": stream, "trigger": args.trigger,
-                       "revision": args.revision, "started_at": started,
-                       "finished_at": dt.datetime.now(dt.timezone.utc).isoformat()}
-        summary["observed_run_id"] = observed[0]["run_id"] if observed else None
-        summary["baseline_run_id"] = baseline[0]["run_id"] if baseline else None
-        summary["run_id"] = run_id
+
+        summary = {
+            **summarize_scan(report, reason, observed, baseline),
+            "stream": stream,
+            "trigger": args.trigger,
+            "revision": args.revision,
+            "started_at": started,
+            "finished_at": utc_timestamp(),
+            "observed_run_id": observed[0]["run_id"] if observed else None,
+            "baseline_run_id": baseline[0]["run_id"] if baseline else None,
+            "run_id": run_id,
+        }
         (temporary / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         temporary.rename(runs / run_id)
         return summary
 
 
+def add_runtime_options(parser):
+    parser.add_argument("--state", default=None, help="state directory (default .security-runtime in cwd)")
+    parser.add_argument("--scanner", default=None, help="path to secdepth scan.py")
+    parser.add_argument("--timeout", type=int, default=1800)
+
+
+def add_scan_arguments(parser, *, watch=False):
+    parser.add_argument("target")
+    parser.add_argument("--stream", required=True, type=valid_stream)
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--osv-data", type=pathlib.Path)
+    parser.add_argument("--revision")
+    if watch:
+        parser.add_argument("--interval", type=float, required=True)
+        parser.add_argument("--once", action="store_true")
+    else:
+        parser.add_argument("--trigger", choices=TRIGGERS, default="manual")
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--state", default=None, help="state directory (default .security-runtime in cwd)")
-    p.add_argument("--scanner", default=None, help="path to secdepth scan.py")
-    p.add_argument("--timeout", type=int, default=1800)
+    add_runtime_options(p)
     sub = p.add_subparsers(dest="command", required=True)
-    def add_common(q):
-        q.add_argument("--stream", required=True, type=valid_stream)
-        q.add_argument("--offline", action="store_true")
-        q.add_argument("--osv-data", type=pathlib.Path)
-
-    def add_run(q):
-        q.add_argument("target")
-        add_common(q)
-        q.add_argument("--revision")
-        q.add_argument("--trigger", choices=TRIGGERS, default="manual")
-    add_run(sub.add_parser("run"))
-    w = sub.add_parser("watch")
-    w.add_argument("target")
-    add_common(w)
-    w.add_argument("--revision")
-    w.add_argument("--interval", type=float, required=True)
-    w.add_argument("--once", action="store_true")
+    add_scan_arguments(sub.add_parser("run"))
+    add_scan_arguments(sub.add_parser("watch"), watch=True)
     return p
 
 
-def main(argv=None):
-    args = parser().parse_args(argv)
+def run_command(args):
     if args.timeout <= 0:
         raise SystemExit("--timeout must be positive")
     if args.command == "watch" and (not math.isfinite(args.interval) or args.interval <= 0):
@@ -250,6 +181,10 @@ def main(argv=None):
             time.sleep(args.interval)
     except KeyboardInterrupt:
         return 130
+
+
+def main(argv=None):
+    return run_command(parser().parse_args(argv))
 
 
 if __name__ == "__main__":

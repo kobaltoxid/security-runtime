@@ -20,13 +20,13 @@ gh run download "$SCAN_RUN_ID" \
 From the security-runtime checkout, run the first step. The worker selects the first finding flagged for review unless you pass `--finding` with an advisory ID. The default model is Claude Haiku.
 
 ```sh
-python3 triage.py .state/go-pilot --db .state/triage.sqlite3 --step
+python3 main.py triage .state/go-pilot --db .state/triage.sqlite3 --step
 ```
 
 Run the same command without `--step` to continue to a final verdict. You can also press Ctrl-C during a normal run and repeat the command to resume. The worker repeats any model call whose result was interrupted before the checkpoint committed.
 
 ```sh
-python3 triage.py .state/go-pilot --db .state/triage.sqlite3
+python3 main.py triage .state/go-pilot --db .state/triage.sqlite3
 ```
 
 ## Read the result

@@ -6,6 +6,8 @@ The hosted pull request review is available for the [Go Discord bot pilot](https
 
 You can also scan a source checkout or release artifact locally. When SecDepth receives a compiled artifact, it uses secpeel to identify the components inside it and collect evidence about the code that shipped.
 
+Run `python3 main.py --help` to see the commands for scanning, watching a target, and reviewing a finding.
+
 - [Use the reusable GitHub Actions workflow](docs/monitor-a-target.md#run-on-github-actions)
 - [Run a local scan](docs/monitor-a-target.md#run-a-scan)
 - [Review a flagged finding and resume an interrupted review](docs/triage-a-finding.md)

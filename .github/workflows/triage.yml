@@ -264,8 +264,8 @@ jobs:
           if test -n "$TRIAGE_FINDING"; then
             args+=(--finding "$TRIAGE_FINDING")
           fi
-          python3 triage.py "${args[@]}" --step > "$RUNNER_TEMP/triage-checkpoint.json"
-          python3 triage.py "${args[@]}" > "$RUNNER_TEMP/triage-verdict.json"
+          python3 main.py triage "${args[@]}" --step > "$RUNNER_TEMP/triage-checkpoint.json"
+          python3 main.py triage "${args[@]}" > "$RUNNER_TEMP/triage-verdict.json"
 
       - name: Upload triage verdict
         if: ${{ success() && !inputs.verify_only && needs.scan.outputs.has_findings == 'true' && needs.scan.outputs.receipt_name != '' }}
