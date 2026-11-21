@@ -57,3 +57,16 @@ gh workflow run triage.yml --repo kobaltoxid/security-runtime --ref main
 Use `-f verify_only=true` to test the scan, artifact handoff, and CLI installation without making a model request.
 
 Open the run under **Actions** to see the check and download its artifacts. The hosted workflow starts a fresh database per run and resumes from that database between its checkpoint and verdict steps.
+
+## Review a pull request scan
+
+Start with a successful **SecDepth dependency scan** run from an open pull request in the Go Discord bot repository. Copy the numeric run ID from its Actions URL and dispatch hosted triage from `main`.
+
+```sh
+gh workflow run triage.yml --repo kobaltoxid/security-runtime --ref main \
+  -f scan_run_id=44832734825
+```
+
+The job verifies the scan workflow, PR head, and artifact before handing the report to the model step. A newer PR commit requires a new scan. The job skips model review when the report has no flagged findings.
+
+Download the verdict artifact to see the review and its `source.json`. That file records the original scan run, pull request, and commit. The pilot accepts same-repository pull requests against `main` in the Go Discord bot repository.

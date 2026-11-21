@@ -12,6 +12,10 @@ on:
         required: false
         default: false
         type: boolean
+      scan_run_id:
+        description: Successful bg-cars-discord-bot PR scan run ID to triage
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,14 +27,43 @@ concurrency:
 env:
   TARGET_SHA: c4ba0863b53eb49dc2daf3f7ca959f3ef47e757b
   SECDEPTH_SHA: f371a9725cb17163d21b7390f3c5c1e811e6f005
+  PR_SCAN_RUN_ID: ${{ inputs.scan_run_id }}
 
 jobs:
   scan:
     if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      has_findings: ${{ steps.findings.outputs.has_findings }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Check out security-runtime for PR handoff
+        if: ${{ inputs.scan_run_id != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download and verify PR scan handoff
+        if: ${{ inputs.scan_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PR_SCAN_RUN_ID" = "${PR_SCAN_RUN_ID//[^0-9]/}" || {
+            printf '%s\n' 'scan_run_id must contain only digits' >&2
+            exit 1
+          }
+          python3 .github/scripts/pr_scan_input.py \
+            --run-id "$PR_SCAN_RUN_ID" \
+            --output-dir "$RUNNER_TEMP/secdepth-handoff"
+
       - name: Check out target snapshot
+        if: ${{ inputs.scan_run_id == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kobaltoxid/bg-cars-discord-bot
@@ -39,6 +72,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out SecDepth
+        if: ${{ inputs.scan_run_id == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kobaltoxid/secdepth
@@ -47,6 +81,7 @@ jobs:
           persist-credentials: false
 
       - name: Scan target snapshot
+        if: ${{ inputs.scan_run_id == '' }}
         shell: bash
         env:
           SECDEPTH_CACHE: ${{ runner.temp }}/secdepth-cache
@@ -74,6 +109,30 @@ jobs:
           test -s "$output/checks.json" || fail "checks.json was not created"
           cp "$output/report.json" "$handoff/report.json"
           cp "$output/checks.json" "$handoff/checks.json"
+
+      - name: Detect flagged findings
+        id: findings
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/secdepth-handoff/report.json" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import pathlib
+          import sys
+          report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          findings = report.get("vulnerabilities")
+          if not isinstance(findings, list):
+              raise SystemExit("report has no vulnerabilities list")
+          flagged = any(
+              isinstance(item, dict)
+              and isinstance(item.get("review"), dict)
+              and item["review"].get("needed") is True
+              for item in findings
+          )
+          with pathlib.Path(sys.argv[2]).open("a", encoding="utf-8") as output:
+              output.write(f"has_findings={'true' if flagged else 'false'}\n")
+          PY
 
       - name: Upload triage input
         if: ${{ success() }}
@@ -114,6 +173,20 @@ jobs:
           name: triage-input-${{ github.run_id }}
           path: ${{ runner.temp }}/triage-input
 
+      - name: Record scan provenance
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/triage-input/source.json"
+          if test -f "$source"; then
+            {
+              printf '%s\n' '### Scan provenance' '```json'
+              cat "$source"
+              printf '%s\n' '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -132,7 +205,7 @@ jobs:
         run: claude --version
 
       - name: Run resumable triage
-        if: ${{ !inputs.verify_only }}
+        if: ${{ !inputs.verify_only && needs.scan.outputs.has_findings == 'true' }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TRIAGE_FINDING: ${{ inputs.finding }}
@@ -150,7 +223,7 @@ jobs:
           python3 triage.py "${args[@]}" > "$RUNNER_TEMP/triage-verdict.json"
 
       - name: Upload triage verdict
-        if: ${{ always() && !inputs.verify_only }}
+        if: ${{ always() && !inputs.verify_only && needs.scan.outputs.has_findings == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: triage-verdict-${{ github.run_id }}
@@ -158,6 +231,7 @@ jobs:
             ${{ runner.temp }}/triage-checkpoint.json
             ${{ runner.temp }}/triage-verdict.json
             ${{ runner.temp }}/triage.sqlite3
+            ${{ runner.temp }}/triage-input/source.json
           if-no-files-found: error
           overwrite: true
           retention-days: 7
