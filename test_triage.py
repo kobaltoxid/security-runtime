@@ -209,6 +209,51 @@ class TriageTest(unittest.TestCase):
         self.assertEqual("claude-oauth", hosted["provider"])
         self.assertNotEqual(local["run_id"], hosted["run_id"])
 
+    def test_gate_rejection_is_resumed_with_one_finish_only_correction(self):
+        code, paused, calls = self.invoke(lambda model, request: {"action": "inspect_checks"}, "--step")
+        self.assertEqual((0, 1), (code, calls))
+        self.assertEqual("paused", paused["status"])
+
+        code, rejected, calls = self.invoke(lambda model, request: finish("evidence_conflicts_with_report", ["checks"]), "--step")
+        self.assertEqual((0, 1), (code, calls))
+        self.assertEqual("paused", rejected["status"])
+
+        def correction(model, request):
+            self.assertEqual(["finish"], request["available_actions"])
+            self.assertIn("acceptance gate", request["gate_feedback"])
+            return finish("evidence_supports_report", ["checks"])
+
+        code, final, calls = self.invoke(correction)
+        self.assertEqual((0, 1), (code, calls))
+        self.assertEqual("final", final["status"])
+        self.assertEqual("evidence_supports_report", final["final"]["verdict"])
+        code, replay, calls = self.invoke(AssertionError("replayed completed run"))
+        self.assertEqual((0, 0), (code, calls))
+        self.assertEqual(final, replay)
+        with contextlib.closing(sqlite3.connect(self.db)) as db:
+            self.assertEqual(
+                [(1, "inspect_checks"), (2, "gate_rejection"), (3, "finish")],
+                db.execute("SELECT sequence, action FROM trace ORDER BY sequence").fetchall(),
+            )
+
+    def test_repeated_gate_mismatch_becomes_inconclusive_and_replays(self):
+        self.invoke(lambda model, request: {"action": "inspect_checks"}, "--step")
+        self.invoke(lambda model, request: finish("evidence_conflicts_with_report", ["checks"]), "--step")
+        code, final, calls = self.invoke(lambda model, request: finish("evidence_conflicts_with_report", ["checks"]))
+        self.assertEqual((0, 1), (code, calls))
+        self.assertEqual("insufficient_evidence", final["final"]["verdict"])
+        self.assertIn("acceptance gate", final["final"]["reason"])
+        code, replay, calls = self.invoke(AssertionError("replayed completed run"))
+        self.assertEqual((0, 0), (code, calls))
+        self.assertEqual(final, replay)
+
+    def test_empty_checks_are_inconclusive_without_correction(self):
+        self.write_json("checks.json", {"results": []})
+        self.invoke(lambda model, request: {"action": "inspect_checks"}, "--step")
+        code, result, calls = self.invoke(lambda model, request: finish("evidence_supports_report", ["checks"]))
+        self.assertEqual((0, 1), (code, calls))
+        self.assertEqual("insufficient_evidence", result["final"]["verdict"])
+
 
 class TransportTest(unittest.TestCase):
     def test_shell_profile_never_falls_back_to_plain_claude(self):

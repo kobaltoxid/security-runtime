@@ -21,14 +21,13 @@ Figure 1. Scan and triage path. Green: main path; dashed grey: model reply. See 
 
 1. **Run the scan.** The reusable `scan.yml` workflow runs SecDepth on the exact pull request commit and saves its reports. Locally, `runtime.py` scans a checkout or artifact and compares findings across runs. SecDepth calls secpeel to examine compiled artifacts. [Monitor a target](monitor-a-target.md)
 2. **Request a review.** A maintainer selects a completed scan. The hosted workflow verifies the pull request commit and saved artifact before `triage.py` selects one flagged finding. Claude can ask the runtime for the recorded checks or affected components, then return a verdict.
-3. **Check the evidence references.** The runtime allows up to two evidence requests. It returns `insufficient_evidence` if Claude proposes an invalid action, repeats a request, or cites evidence the runtime did not provide. Any other verdict must cite at least one recorded observation.
-4. **Save the verdict.** The worker stores each step and the final verdict in SQLite. It identifies a run by its input, model, provider, and policy version. When you repeat a review with the same inputs and database, the worker resumes from the last saved step or returns the stored verdict. [Triage a finding](triage-a-finding.md)
+3. **Check the evidence and verdict.** The runtime allows up to two evidence requests. It applies floop’s acceptance pattern by comparing the proposed verdict with the observed SecDepth checks for the selected finding. If the verdict misstates what those checks show, the runtime can ask for one correction using the same evidence. [floop](https://github.com/kobaltoxid/floop)
+4. **Save the verdict.** The worker stores each step and the final verdict in SQLite. If the checks are insufficient or the correction still fails the gate, the worker records `insufficient_evidence`. The runtime identifies a run by its input, model, provider, and policy version. Repeating a review with the same inputs and database resumes it or returns the stored verdict. [Triage a finding](triage-a-finding.md)
 
 ## Planned additions
 
 The [private project board](https://github.com/users/kobaltoxid/projects/1) tracks the order, status, and completion criteria for the remaining work.
 
-- **Review the verdict.** A floop-based check will judge whether the cited evidence supports the verdict. If the check fails, the runtime will allow one revision before marking the review inconclusive. [floop](https://github.com/kobaltoxid/floop)
 - **Add CI triggers.** The reusable workflow currently scans pull requests. Add push, release, and scheduled scans. For a release, save the artifact digest and the evidence that secpeel found in the compiled artifact.
 - **Quality baseline.** Compare SecDepth alone, a one-shot review, and the gated loop on the same held-out, human-labeled findings. Use the same model and evidence for both model variants. Report inconclusive cases beside accuracy so the gate cannot look better by withholding difficult verdicts.
 - **Gated writes.** A GitHub write, such as a PR comment, waits for an approval that becomes invalid if the destination or body changes.

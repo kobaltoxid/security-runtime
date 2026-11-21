@@ -121,6 +121,8 @@ def validate_action(proposal, review, observations):
         return rejected_action(observations, "The model referenced evidence that it did not inspect.")
     if verdict != "insufficient_evidence" and not refs:
         return rejected_action(observations, "The model supplied no reference to observed evidence.")
+    if verdict == "insufficient_evidence":
+        reason = "The model abstained from giving a reachability verdict."
     return {**proposal, "reason": reason.strip()}
 
 
@@ -131,11 +133,14 @@ def observation_for(action, review):
         finding_id = finding["id"]
         allowed = {"advisory_id", "component_id", "evidence", "proposed_reachability", "scope", "confidence"}
         results = review.checks.get("results", []) if isinstance(review.checks, dict) else []
+        if not isinstance(results, list):
+            results = []
         affected_ids = set(affected)
         records = [
             {key: item[key] for key in allowed if key in item}
             for item in results
             if isinstance(item, dict) and item.get("advisory_id") == finding_id
+            and isinstance(item.get("component_id"), str)
             and item.get("component_id") in affected_ids
         ]
         return {"kind": "checks", "advisory_id": finding_id, "results": records}

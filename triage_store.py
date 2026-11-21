@@ -85,6 +85,20 @@ def save_final(db, run_id, sequence, proposal, now):
                         "observation_json": None, "created_at": now}
 
 
+def save_rejection(db, run_id, sequence, proposal, assessment, now):
+    """Persist a rejected finish as an audit trace before a correction."""
+    audited = {**proposal, "gate": assessment}
+    proposal_json = json.dumps(audited)
+    db.execute("""INSERT INTO trace
+        (run_id, sequence, action, proposal_json, observation_json, created_at)
+        VALUES (?,?,?,?,?,?)""",
+               (run_id, sequence, "gate_rejection", proposal_json, None, now))
+    db.execute("UPDATE runs SET updated_at=?,status='paused' WHERE run_id=?", (now, run_id))
+    db.commit()
+    return {"sequence": sequence, "action": "gate_rejection", "proposal_json": proposal_json,
+            "observation_json": None, "created_at": now}
+
+
 def output(run, traces, provider, policy_version):
     result = {"run_id": run["run_id"], "status": run["status"], "provider": provider,
               "policy_version": policy_version, "model": run["model"],

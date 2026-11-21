@@ -31,9 +31,15 @@ python3 main.py triage .state/go-pilot --db .state/triage.sqlite3
 
 ## Read the result
 
-Read the verdict alongside the original scan. The JSON names the records Claude cited. The worker returns `insufficient_evidence` if Claude abstains or if the runtime rejects the proposed action. If you repeat a completed review with the same scan files, model, provider, policy version, and database, the worker returns the saved verdict.
+Read the verdict alongside the original scan. The JSON names the recorded observations the verdict cites. A substantive verdict says whether the observed checks agree with the reachability status reported by SecDepth.
 
 The runtime validates each proposed action before acting on it. Claude can request the recorded checks or the affected components for the selected finding. The worker allows up to two evidence requests and saves the records it supplies. Each decision comes from a separate model call with tools disabled.
+
+The floop acceptance gate checks a proposed verdict without another model call. A verdict needs cited checks with evidence for every affected component. The checks must agree on a known reachability status, and the report must state a known status for comparison.
+
+If the checks support a correction, the worker saves the reason the verdict failed and asks Claude to revise it once. The revision uses the observations already saved in SQLite. The worker writes the final explanation from those checks.
+
+The worker returns `insufficient_evidence` when Claude abstains, the runtime rejects an action, the recorded checks cannot support a verdict, or the revision fails. If you repeat a completed review with the same scan files, model, provider, policy version, and database, the worker returns the saved verdict. A policy upgrade starts a separate run and keeps the earlier verdict in SQLite.
 
 ## Runner authentication
 

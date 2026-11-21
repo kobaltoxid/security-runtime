@@ -11,14 +11,18 @@ from runtime_support import exclusive_lock, utc_timestamp
 import triage_evidence
 import triage_model
 import triage_store
+import triage_gate
 
 DEFAULT_PROVIDER = "claude2"
 PROVIDERS = {DEFAULT_PROVIDER, "claude-oauth"}
-POLICY_VERSION = "triage-policy-1"  # Bump when evidence or verdict policy changes.
+POLICY_VERSION = "triage-policy-2"  # Bump when evidence or verdict policy changes.
 
 
-def choose_action(review, observations, model, provider):
+def choose_action(review, observations, model, provider, feedback=None):
     request = triage_evidence.request_for(review, observations)
+    if feedback:
+        request["available_actions"] = ["finish"]
+        request["gate_feedback"] = feedback
     try:
         if provider == DEFAULT_PROVIDER:
             proposal = triage_model.choose(model, request)
@@ -39,14 +43,32 @@ def review_step(review, db_path, lock_path, model, provider):
             return triage_store.output(run, traces, provider, POLICY_VERSION)
 
         observations = triage_store.observations_from(traces)
-        proposal = choose_action(review, observations, model, provider)
+        feedback = None
+        if traces and traces[-1]["action"] == "gate_rejection":
+            rejection = json.loads(traces[-1]["proposal_json"])
+            feedback = (rejection["gate"]["reason"]
+                        + " Provide a corrected finish verdict using the checks already observed.")
+
+        proposal = choose_action(review, observations, model, provider, feedback)
+        if feedback and proposal["action"] != "finish":
+            proposal = triage_evidence.rejected_action(
+                observations, "The correction requested another inspection after the gate rejected the verdict.")
+
         sequence = len(traces) + 1
-        if proposal["action"] == "finish":
-            final, trace = triage_store.save_final(db, run["run_id"], sequence, proposal, utc_timestamp())
-            run["status"], run["final_json"] = "final", final
-        else:
+        now = utc_timestamp()
+        if proposal["action"] != "finish":
             evidence = triage_evidence.observation_for(proposal["action"], review)
-            trace = triage_store.save_observation(db, run["run_id"], sequence, proposal, evidence, utc_timestamp())
+            trace = triage_store.save_observation(db, run["run_id"], sequence, proposal, evidence, now)
+        else:
+            assessment = triage_gate.assess(proposal, review, observations)
+            if assessment["actionable"] and feedback is None:
+                trace = triage_store.save_rejection(db, run["run_id"], sequence, proposal, assessment, now)
+            else:
+                final_proposal = assessment.get("proposal", proposal)
+                if not assessment["accepted"]:
+                    final_proposal = triage_evidence.rejected_action(observations, assessment["reason"])
+                final, trace = triage_store.save_final(db, run["run_id"], sequence, final_proposal, now)
+                run["status"], run["final_json"] = "final", final
 
         traces.append(trace)
         return triage_store.output(run, traces, provider, POLICY_VERSION)
