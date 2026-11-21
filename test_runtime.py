@@ -3,6 +3,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -144,7 +145,7 @@ class RuntimeTest(unittest.TestCase):
             else:
                 raise KeyboardInterrupt
 
-        with patch.object(runtime.time, "sleep", side_effect=sleep):
+        with patch.object(runtime, "time", SimpleNamespace(sleep=sleep)):
             code, runs = self.invoke("watch", "--interval", "5")
         self.assertEqual(130, code)
         self.assertEqual(["failed", "complete"], [run["status"] for run in runs])
