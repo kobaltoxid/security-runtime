@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 REPOSITORY = "kobaltoxid/bg-cars-discord-bot"
+OPT_IN_LABEL = "secdepth-triage"
 WORKFLOW_PATH = ".github/workflows/secdepth.yml"
 WORKFLOW_ID = 425513024
 CALLER_BLOB = "bd27fe9d4f652e598115a7b4fc59caa92e986268"
@@ -96,13 +97,21 @@ def _validate_run(run: dict[str, Any], run_id: int) -> tuple[int, int, str]:
     return pr_number, attempt, head_sha
 
 
-def _validate_pr(pr: dict[str, Any], number: int, head_sha: str) -> None:
+def _validate_pr(pr: dict[str, Any], number: int, head_sha: str, *, require_opt_in: bool = False) -> None:
     if pr.get("number") != number or pr.get("state") != "open":
         raise InputError("associated pull request is not open")
+    if not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+        raise InputError("pull request head SHA is not canonical")
     if pr.get("head", {}).get("sha") != head_sha or pr.get("head", {}).get("repo", {}).get("full_name") != REPOSITORY:
         raise InputError("current pull request head does not match the completed run")
     if pr.get("base", {}).get("ref") != "main" or pr.get("base", {}).get("repo", {}).get("full_name") != REPOSITORY:
         raise InputError("pull request base is not the approved main branch")
+    if require_opt_in:
+        labels = pr.get("labels")
+        if not isinstance(labels, list) or not any(
+            isinstance(label, dict) and label.get("name") == OPT_IN_LABEL for label in labels
+        ):
+            raise InputError(f"pull request is not opted in with the {OPT_IN_LABEL} label")
 
 
 def _validate_workflow_blob(blob: dict[str, Any]) -> None:
@@ -185,7 +194,23 @@ def _write_json(path: Path, value: Any) -> None:
             os.unlink(tmp)
 
 
-def fetch(run_id_text: str, output_dir: Path) -> None:
+def receipt_name(pr_number: int, head_sha: str) -> str:
+    return f"triage-pr-{pr_number}-{head_sha}"
+
+
+def write_github_output(path: Path, name: str, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{name}={value}\n")
+
+
+def fetch(
+    run_id_text: str,
+    output_dir: Path,
+    *,
+    require_opt_in: bool = False,
+    github_output: Path | None = None,
+) -> None:
     run_id = _run_id(run_id_text)
     run = gh_api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
     if not isinstance(run, dict):
@@ -194,7 +219,7 @@ def fetch(run_id_text: str, output_dir: Path) -> None:
     pr = gh_api(f"repos/{REPOSITORY}/pulls/{pr_number}")
     if not isinstance(pr, dict):
         raise InputError("pull request API response is invalid")
-    _validate_pr(pr, pr_number, head_sha)
+    _validate_pr(pr, pr_number, head_sha, require_opt_in=require_opt_in)
     blob = gh_api(f"repos/{REPOSITORY}/contents/{WORKFLOW_PATH}?ref={head_sha}")
     if not isinstance(blob, dict):
         raise InputError("workflow API response is invalid")
@@ -220,15 +245,26 @@ def fetch(run_id_text: str, output_dir: Path) -> None:
     _write_json(output_dir / "report.json", payload["report.json"])
     _write_json(output_dir / "checks.json", payload["checks.json"])
     _write_json(output_dir / "source.json", source)
+    if require_opt_in and github_output is not None:
+        write_github_output(github_output, "receipt_name", receipt_name(pr_number, head_sha))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--require-opt-in", action="store_true")
+    parser.add_argument("--github-output", type=Path)
     args = parser.parse_args(argv)
     try:
-        fetch(args.run_id, args.output_dir)
+        if args.github_output is not None and not args.require_opt_in:
+            raise InputError("--github-output requires --require-opt-in")
+        fetch(
+            args.run_id,
+            args.output_dir,
+            require_opt_in=args.require_opt_in,
+            github_output=args.github_output,
+        )
     except InputError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

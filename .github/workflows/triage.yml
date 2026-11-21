@@ -1,6 +1,26 @@
 name: Hosted SecDepth triage pilot
 
 on:
+  workflow_call:
+    inputs:
+      finding:
+        description: Advisory ID to review. Empty selects the first flagged finding.
+        required: false
+        type: string
+      verify_only:
+        description: Run scan, artifact handoff, and CLI installation without model access.
+        required: false
+        default: false
+        type: boolean
+      scan_run_id:
+        description: Successful PR scan run ID to triage
+        required: true
+        type: string
+      require_opt_in:
+        description: Require the secdepth-triage label on the source PR.
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       finding:
@@ -28,6 +48,7 @@ env:
   TARGET_SHA: c4ba0863b53eb49dc2daf3f7ca959f3ef47e757b
   SECDEPTH_SHA: f371a9725cb17163d21b7390f3c5c1e811e6f005
   PR_SCAN_RUN_ID: ${{ inputs.scan_run_id }}
+  REQUIRE_OPT_IN: ${{ inputs.require_opt_in }}
 
 jobs:
   scan:
@@ -37,6 +58,7 @@ jobs:
       actions: read
     outputs:
       has_findings: ${{ steps.findings.outputs.has_findings }}
+      receipt_name: ${{ steps.pr_handoff.outputs.receipt_name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -48,6 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Download and verify PR scan handoff
+        id: pr_handoff
         if: ${{ inputs.scan_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,9 +81,14 @@ jobs:
             printf '%s\n' 'scan_run_id must contain only digits' >&2
             exit 1
           }
-          python3 .github/scripts/pr_scan_input.py \
-            --run-id "$PR_SCAN_RUN_ID" \
+          args=(
+            --run-id "$PR_SCAN_RUN_ID"
             --output-dir "$RUNNER_TEMP/secdepth-handoff"
+          )
+          if test "$REQUIRE_OPT_IN" = true; then
+            args+=(--require-opt-in --github-output "$GITHUB_OUTPUT")
+          fi
+          python3 .github/scripts/pr_scan_input.py "${args[@]}"
 
       - name: Check out target snapshot
         if: ${{ inputs.scan_run_id == '' }}
@@ -135,7 +163,7 @@ jobs:
           PY
 
       - name: Upload triage input
-        if: ${{ success() }}
+        if: ${{ success() && (steps.pr_handoff.outputs.receipt_name == '' || steps.findings.outputs.has_findings == 'true') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: triage-input-${{ github.run_id }}
@@ -143,6 +171,16 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+
+      - name: Upload clean opt-in receipt
+        if: ${{ success() && steps.pr_handoff.outputs.receipt_name != '' && steps.findings.outputs.has_findings == 'false' && !inputs.verify_only }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.pr_handoff.outputs.receipt_name }}
+          path: ${{ runner.temp }}/secdepth-handoff/source.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
 
       - name: Upload scan diagnostics
         if: ${{ failure() }}
@@ -155,7 +193,7 @@ jobs:
           retention-days: 7
 
   triage:
-    if: ${{ github.ref == 'refs/heads/main' && needs.scan.result == 'success' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.scan.result == 'success' && (!inputs.require_opt_in || needs.scan.outputs.has_findings == 'true') }}
     needs: scan
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -223,7 +261,21 @@ jobs:
           python3 triage.py "${args[@]}" > "$RUNNER_TEMP/triage-verdict.json"
 
       - name: Upload triage verdict
-        if: ${{ always() && !inputs.verify_only && needs.scan.outputs.has_findings == 'true' }}
+        if: ${{ success() && !inputs.verify_only && needs.scan.outputs.has_findings == 'true' && needs.scan.outputs.receipt_name != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ needs.scan.outputs.receipt_name }}
+          path: |
+            ${{ runner.temp }}/triage-checkpoint.json
+            ${{ runner.temp }}/triage-verdict.json
+            ${{ runner.temp }}/triage.sqlite3
+            ${{ runner.temp }}/triage-input/source.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+      - name: Upload triage diagnostics
+        if: ${{ always() && !inputs.verify_only && needs.scan.outputs.has_findings == 'true' && (needs.scan.outputs.receipt_name == '' || failure()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: triage-verdict-${{ github.run_id }}

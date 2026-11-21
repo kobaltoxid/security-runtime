@@ -1,0 +1,50 @@
+name: PR label triage
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-label-triage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      scan_run_id: ${{ steps.select.outputs.scan_run_id }}
+    steps:
+      - name: Check out selector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Select labeled PR scan
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/select_pr_triage.py --github-output "$GITHUB_OUTPUT"
+
+  triage:
+    needs: select
+    if: ${{ needs.select.outputs.scan_run_id != '' }}
+    uses: ./.github/workflows/triage.yml
+    with:
+      scan_run_id: ${{ needs.select.outputs.scan_run_id }}
+      require_opt_in: true

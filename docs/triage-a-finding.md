@@ -62,13 +62,10 @@ Open the run under **Actions** to see the check and download its artifacts. The 
 
 ## Review a pull request scan
 
-Start with a successful **SecDepth dependency scan** run from an open pull request in the Go Discord bot repository. Set `SCAN_RUN_ID` to the number at the end of its Actions URL, then run the hosted workflow from `main`. GitHub keeps the scan artifact for seven days.
+Add the `secdepth-triage` label to an open pull request in the Go Discord bot repository. The runtime checks labeled pull requests every 15 minutes. It waits for a successful SecDepth scan of the current commit, then verifies the scan workflow and artifact before asking Claude to review one flagged finding.
 
-```sh
-gh workflow run triage.yml --repo kobaltoxid/security-runtime --ref main \
-  -f "scan_run_id=$SCAN_RUN_ID"
-```
+To check for a labeled pull request immediately, open **PR label triage** in GitHub Actions and choose **Run workflow** on `main`. The workflow takes no inputs. [PR label triage](https://github.com/kobaltoxid/security-runtime/actions/workflows/pr-triage.yml)
 
-The job verifies the scan workflow, PR head, and artifact before handing the report to the model step. A newer PR commit requires a new scan. The job skips model review when the report has no flagged findings.
+Each run handles one eligible pull request. The runtime keeps a record of the reviewed commit so a later run can skip it. If the report has no flagged findings, the runtime records that outcome without calling Claude. Leave the label in place to review future commits or remove it to stop requesting further reviews.
 
-Download the verdict artifact and open `triage-input/source.json` to find the original scan run, pull request, and commit. The pilot accepts pull requests whose source branch is in the Go Discord bot repository and whose target branch is `main`.
+Find the verdict in the artifacts of the **PR label triage** run. The artifact name contains the pull request number and commit, and `source.json` records the original scan and pull request. The pilot accepts pull requests whose source branch is in the Go Discord bot repository and whose target branch is `main`.

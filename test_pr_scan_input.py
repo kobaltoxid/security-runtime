@@ -100,6 +100,20 @@ class PrScanInputTests(unittest.TestCase):
             with self.assertRaisesRegex(target.InputError, "SHA256"):
                 target.fetch(str(self.run_id), Path(tempfile.mkdtemp()))
 
+    def test_opt_in_is_rechecked_before_import_and_receipt(self):
+        pr = self.responses[f"repos/{target.REPOSITORY}/pulls/{self.pr}"]
+        with tempfile.TemporaryDirectory() as directory, patch.object(target.subprocess, "run", side_effect=self.fake_run):
+            root = Path(directory)
+            output = root / "github-output"
+            with self.assertRaisesRegex(target.InputError, "not opted in"):
+                target.fetch(str(self.run_id), root / "handoff", require_opt_in=True, github_output=output)
+            self.assertFalse(output.exists())
+            self.assertFalse((root / "handoff").exists())
+
+            pr["labels"] = [{"name": target.OPT_IN_LABEL}]
+            target.fetch(str(self.run_id), root / "handoff", require_opt_in=True, github_output=output)
+            self.assertEqual(f"receipt_name=triage-pr-{self.pr}-{self.sha}\n", output.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
