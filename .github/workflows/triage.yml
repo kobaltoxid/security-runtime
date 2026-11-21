@@ -21,6 +21,10 @@ on:
         required: false
         default: false
         type: boolean
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: Claude Code subscription credential supplied by the triage environment.
+        required: false
   workflow_dispatch:
     inputs:
       finding:
@@ -85,7 +89,7 @@ jobs:
             --run-id "$PR_SCAN_RUN_ID"
             --output-dir "$RUNNER_TEMP/secdepth-handoff"
           )
-          if test "$REQUIRE_OPT_IN" = true; then
+          if test "${REQUIRE_OPT_IN:-}" = true; then
             args+=(--require-opt-in --github-output "$GITHUB_OUTPUT")
           fi
           python3 .github/scripts/pr_scan_input.py "${args[@]}"
@@ -250,7 +254,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLAUDE_CODE_OAUTH_TOKEN"
+          if test -z "$CLAUDE_CODE_OAUTH_TOKEN"; then
+            printf '%s\n' 'Missing Claude Code OAuth token from the triage environment.' >&2
+            exit 1
+          fi
           input="$RUNNER_TEMP/triage-input"
           db="$RUNNER_TEMP/triage.sqlite3"
           args=("$input" --db "$db" --provider claude-oauth --model haiku)
