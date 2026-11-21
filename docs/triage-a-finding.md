@@ -1,15 +1,17 @@
 # Triage a SecDepth finding
 
-Run an evidence review for one flagged finding from a SecDepth report directory or a downloaded GitHub Actions artifact. The worker checkpoints the review in a local SQLite database. Reuse the same artifact, model, and database to resume it.
+When SecDepth flags a finding for review, you can ask Claude whether the evidence in the scan supports the reported conclusion. The worker reviews one finding at a time and saves each step in SQLite. If the review stops before it reaches a verdict, you can resume with the same scan files, model, and database.
 
 ## Get the scan artifact
 
-Use Python 3 and an authenticated `claude2` command. On machines where `claude2` is a shell function, define it in your interactive zsh configuration. The example uses a public scan artifact from the Go pilot. Review only data you are authorized to send through that account.
+For a local review, use Python 3 and an authenticated `claude2` command. If `claude2` is a shell function, define it in the configuration that zsh reads when it opens an interactive shell. Use scan evidence that you are authorized to send through that account.
+
+To use the public Go pilot, open a recent successful scan in GitHub Actions. Set `SCAN_RUN_ID` to the number at the end of the run URL and `SCAN_ARTIFACT_NAME` to the name shown under **Artifacts**.
 
 ```sh
-gh run download 44832734825 \
+gh run download "$SCAN_RUN_ID" \
   --repo kobaltoxid/bg-cars-discord-bot \
-  --name secdepth-pr-1-44832734825-1 \
+  --name "$SCAN_ARTIFACT_NAME" \
   --dir .state/go-pilot
 ```
 
@@ -29,9 +31,9 @@ python3 triage.py .state/go-pilot --db .state/triage.sqlite3
 
 ## Read the result
 
-The worker returns a JSON verdict with evidence references or an `insufficient_evidence` result. A repeated invocation with the same input and model returns the stored verdict. Keep the original scan artifacts for the evidence behind the review.
+Read the verdict alongside the original scan. The JSON names the records Claude cited. The worker returns `insufficient_evidence` if Claude abstains or if the runtime rejects the proposed action. If you repeat a completed review with the same scan files, model, provider, policy version, and database, the worker returns the saved verdict.
 
-The runtime selects which records each evidence request may see and validates the model's proposed action before applying it. Each decision comes from a separate model call with tools disabled, and the worker allows at most two evidence requests before a verdict. The worker stores its own state and uses the SecDepth evidence supplied with the run.
+The runtime validates each proposed action before acting on it. Claude can request the recorded checks or the affected components for the selected finding. The worker allows up to two evidence requests and saves the records it supplies. Each decision comes from a separate model call with tools disabled.
 
 ## Runner authentication
 
@@ -60,13 +62,13 @@ Open the run under **Actions** to see the check and download its artifacts. The 
 
 ## Review a pull request scan
 
-Start with a successful **SecDepth dependency scan** run from an open pull request in the Go Discord bot repository. Copy the numeric run ID from its Actions URL and dispatch hosted triage from `main`.
+Start with a successful **SecDepth dependency scan** run from an open pull request in the Go Discord bot repository. Set `SCAN_RUN_ID` to the number at the end of its Actions URL, then run the hosted workflow from `main`. GitHub keeps the scan artifact for seven days.
 
 ```sh
 gh workflow run triage.yml --repo kobaltoxid/security-runtime --ref main \
-  -f scan_run_id=44832734825
+  -f "scan_run_id=$SCAN_RUN_ID"
 ```
 
 The job verifies the scan workflow, PR head, and artifact before handing the report to the model step. A newer PR commit requires a new scan. The job skips model review when the report has no flagged findings.
 
-Download the verdict artifact to see the review and its `source.json`. That file records the original scan run, pull request, and commit. The pilot accepts same-repository pull requests against `main` in the Go Discord bot repository.
+Download the verdict artifact and open `triage-input/source.json` to find the original scan run, pull request, and commit. The pilot accepts pull requests whose source branch is in the Go Discord bot repository and whose target branch is `main`.

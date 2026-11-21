@@ -1,36 +1,36 @@
 # Review loop design
 
-This page explains how security-runtime turns a dependency scan into a reviewed verdict and which design rules the unattended loop must keep. Order, status, and acceptance criteria for each piece of work are tracked on the [LLM Security Runtime Roadmap](https://github.com/users/kobaltoxid/projects/1) project board, which is private.
+SecDepth can match a dependency to a known advisory while leaving open whether the affected code runs in the application. When SecDepth flags a finding like this for review, the runtime gives Claude the evidence from the scan and records a separate verdict. The maintainer can return to the original scan to see how the finding was reported.
 
 ## Goal and constraints
 
-The goal is an unattended loop that turns a change to source or a release artifact into a reviewable dependency security report. Ordinary runs should need no human input once the review criteria are configured.
+The goal is to scan changes to source code and release artifacts, review the evidence, and save a report a maintainer can inspect. Once the review criteria are configured, ordinary runs should need no human input. The current pull request pilot starts when a maintainer selects a completed scan.
 
-- The runtime, not the model, owns tool permissions, time budgets, and stop conditions.
+- The runtime sets tool permissions and time limits and decides when a review ends.
 - The model sees only the current run's evidence. The design uses no retrieval index or model training.
 - Public pilot jobs use public source and advisory data. Reports from private inputs stay restricted.
 - Any write to a live system needs a runtime check that ties the approver, revision, destination, and exact payload to the recorded action.
 
 ## How it works today
 
-A scan produces reports, and the triage worker reviews one finding from those reports with a model. The model only proposes actions; the runtime decides what evidence it sees and records each step.
+The scan and the review run separately. This allows GitHub Actions to report whether the scan completed and lets a maintainer request a review using the saved evidence.
 
 ![Scan reports feed the triage worker, which exchanges requests and actions with Claude and records a verdict in SQLite.](diagrams/scan-and-triage.svg)
 
 Figure 1. Scan and triage path. Green: main path; dashed grey: model reply. See the [D2 source](diagrams/scan-and-triage.d2).
 
-1. **Scan.** `runtime.py` runs SecDepth on a local checkout or artifact, and the reusable `scan.yml` workflow runs it on a pull request's head commit. SecDepth calls secpeel for compiled artifacts. The runtime keeps the JSON and HTML reports, scan log, and finding deltas for each stream. [Monitor a target](monitor-a-target.md)
-2. **Triage.** `triage.py` selects a finding that SecDepth flagged for review. Each model call has tools disabled and returns one action: inspect checks, inspect components, or finish with a verdict.
-3. **Validate.** The runtime returns `insufficient_evidence` when the model proposes an invalid action, repeats an inspection, asks for more than two, or cites evidence it did not inspect. A verdict other than `insufficient_evidence` must cite at least one observation.
-4. **Record.** Each step and the final verdict are stored in SQLite, keyed by a digest of the input, model, provider, and policy version. A rerun resumes from the last committed step or returns the stored verdict. [Triage a finding](triage-a-finding.md)
+1. **Run the scan.** The reusable `scan.yml` workflow runs SecDepth on the exact pull request commit and saves its reports. Locally, `runtime.py` scans a checkout or artifact and compares findings across runs. SecDepth calls secpeel to examine compiled artifacts. [Monitor a target](monitor-a-target.md)
+2. **Request a review.** A maintainer selects a completed scan. The hosted workflow verifies the pull request commit and saved artifact before `triage.py` selects one flagged finding. Claude can ask the runtime for the recorded checks or affected components, then return a verdict.
+3. **Check the evidence references.** The runtime allows up to two evidence requests. It returns `insufficient_evidence` if Claude proposes an invalid action, repeats a request, or cites evidence the runtime did not provide. Any other verdict must cite at least one recorded observation.
+4. **Save the verdict.** The worker stores each step and the final verdict in SQLite. It identifies a run by its input, model, provider, and policy version. When you repeat a review with the same inputs and database, the worker resumes from the last saved step or returns the stored verdict. [Triage a finding](triage-a-finding.md)
 
 ## Planned additions
 
-These describe how the remaining work should behave. The project board holds their order and completion criteria.
+The [private project board](https://github.com/users/kobaltoxid/projects/1) tracks the order, status, and completion criteria for the remaining work.
 
-- **Acceptance check.** A [floop](https://github.com/kobaltoxid/floop)-based review checks whether the cited evidence supports the verdict. If it fails, the runtime allows one bounded revision before marking the review inconclusive.
-- **More triggers in CI.** The local runtime already labels push, merge-request, release, and scheduled runs. The reusable workflow scans only pull requests today; release scans should record the artifact digest and secpeel evidence.
+- **Review the verdict.** A floop-based check will judge whether the cited evidence supports the verdict. If the check fails, the runtime will allow one revision before marking the review inconclusive. [floop](https://github.com/kobaltoxid/floop)
+- **Add CI triggers.** The reusable workflow currently scans pull requests. Add push, release, and scheduled scans. For a release, save the artifact digest and the evidence that secpeel found in the compiled artifact.
 - **Quality baseline.** Compare SecDepth alone, a one-shot review, and the gated loop on the same held-out, human-labeled findings. Use the same model and evidence for both model variants. Report inconclusive cases beside accuracy so the gate cannot look better by withholding difficult verdicts.
 - **Gated writes.** A GitHub write, such as a PR comment, waits for an approval that becomes invalid if the destination or body changes.
 
-After the pilot, isolated regression fuzzing of owned code could add test and coverage evidence. Kubernetes Jobs become useful only when scans need a separate worker pool or stronger isolation; until then, a CI runner with persistent state is enough.
+After the pilot, isolated regression fuzzing of code we own could add test and coverage evidence. A CI runner with persistent state is enough for the pilot. Kubernetes Jobs become useful when scans need a separate worker pool or stronger isolation.

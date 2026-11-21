@@ -1,10 +1,10 @@
 # Monitor a target
 
-Use the runtime to scan a local source checkout or release artifact and retain the reports across runs. It calls secdepth's `scan.py`, which calls secpeel for artifact files. The runtime schedules scans and compares results. Findings flagged for review stay attached to the report.
+The runtime keeps a history of scans for a source checkout or release artifact. You can compare two revisions to see which findings changed or scan the same revision again after new advisories appear. SecDepth writes the scan report and marks findings that need review. When you scan a compiled artifact, SecDepth calls secpeel to identify what shipped.
 
 ## Run a scan
 
-Use Python 3 on macOS or Linux with sibling `secdepth` and `secpeel` checkouts. Start with a trusted local checkout or artifact. Keep the state directory outside the scanned checkout.
+Use Python 3 on macOS or Linux. Put the `secdepth` and `secpeel` checkouts next to `security-runtime/`. Choose a trusted local checkout or artifact, and keep the state directory outside the target you scan.
 
 From `security-runtime/`, supply a Git commit SHA for a source scan.
 
@@ -20,7 +20,9 @@ python3 runtime.py --state .state run /path/to/release.tar.gz \
   --stream project-linux-release --revision "$ARTIFACT_DIGEST" --trigger release
 ```
 
-The stream identifies the history being compared. Use a stream per branch or merge request and a separate stream for each release artifact variant. The revision is caller-supplied metadata, so make sure the local input matches it. When the last successful scan was complete, a repeated event with the same trigger and revision reuses that result. Scheduled runs, including `watch`, always scan again.
+A stream is the scan history for one target. Give each branch, pull request, or release artifact variant its own stream. You supply the revision, so check that the local input matches it.
+
+If the last successful scan was complete, an event with the same trigger and revision reuses that result. Scheduled runs, including `watch`, always scan again.
 
 ## Run periodically
 
@@ -37,13 +39,13 @@ A mutable checkout can change between scans. For reproducible reports, give each
 
 Each attempt emits a JSON summary on stdout. Use its `run_id` to find the summary, scan log and available reports in `STATE/STREAM/runs/RUN_ID/`. A failed scan leaves the scan history available for the next run.
 
-New and changed findings use the latest successful report, with the last complete report filling gaps in that comparison. Missing findings require both a complete current scan and a complete baseline. The runtime marks scans with coverage gaps, advisory lookup gaps or offline advisory data as partial.
+To identify new or changed findings, the runtime looks at the latest successful report and uses the last complete report to fill gaps in that comparison. It reports a finding as missing only when both the current scan and the baseline are complete. The runtime marks scans as partial if they have coverage gaps, advisory lookup gaps, or offline advisory data.
 
 A missing finding describes a difference from the baseline. Verify the reason in the reports before treating it as remediation.
 
 ## Connect CI or Kubernetes
 
-Start with one repository and use the same `run` command in a CI job. For a push or merge request, hand over the exact commit checkout and label the trigger `push` or `merge-request`. For a release, hand over the output of the existing build job. Retain the runtime state between jobs and publish the JSON and HTML as CI artifacts.
+If you use another CI service, start with one repository and call `runtime.py run` from a job. For a push or merge request, pass the checkout for the exact commit and set the trigger to `push` or `merge-request`. For a release, pass the artifact from the build job. Keep the runtime state between jobs so it can compare findings, and save the JSON and HTML reports as CI artifacts.
 
 GitLab supports rules for push, merge request, tag and scheduled pipelines. [GitLab job rules](https://docs.gitlab.com/ci/jobs/job_rules/)
 
@@ -75,4 +77,4 @@ jobs:
       ecosystem: npm
 ```
 
-The shared workflow scans the exact PR head without installing dependencies. Find the JSON and HTML reports, scan log, and run metadata under **Artifacts** in the calling repository's workflow run. A failed scan fails the job. Review advisory matches and coverage gaps in the artifacts.
+The shared workflow scans the exact commit at the head of the pull request without installing dependencies. If the scanner fails, GitHub marks the job as failed. Open **Artifacts** in the calling repository's workflow run to read the scan log or inspect the reports for advisory matches and coverage gaps.
