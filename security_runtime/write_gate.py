@@ -1,4 +1,4 @@
-"""Approval-gated GitHub pull request comments.
+"""Post a pull request comment only after a person approves its exact text.
 
 A request records the exact comment the runtime wants to post. Its digest covers
 the repository, pull request, head commit, and body, so an approval applies only
@@ -17,7 +17,7 @@ import subprocess
 from .runtime_support import exclusive_lock, utc_timestamp
 
 MARKER = "<!-- security-runtime-write: {digest} -->"
-REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 MAX_BODY = 60000
 
 
@@ -26,7 +26,7 @@ class WriteGateError(ValueError):
 
 
 def comment_action(repository, pull_request, head_sha, body):
-    if not REPOSITORY.fullmatch(repository or ""):
+    if not REPOSITORY_PATTERN.fullmatch(repository or ""):
         raise WriteGateError("repository must be owner/name")
     if not isinstance(pull_request, int) or pull_request <= 0:
         raise WriteGateError("pull request must be a positive number")
@@ -111,8 +111,8 @@ def post(db, digest, github, now):
     return load(db, digest)
 
 
-class GhClient:
-    """GitHub access through the authenticated `gh` CLI."""
+class GitHubClient:
+    """Reads and writes GitHub through the signed-in `gh` command."""
 
     def _api(self, *args, payload=None):
         try:
@@ -164,7 +164,7 @@ def add_arguments(parser):
 
 
 def run_command(args, parser, github=None):
-    github = github or GhClient()
+    github = github or GitHubClient()
     args.db.parent.mkdir(parents=True, exist_ok=True)
     lock = args.db.with_suffix(args.db.suffix + ".lock")
     try:

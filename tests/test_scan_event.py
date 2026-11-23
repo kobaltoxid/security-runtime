@@ -14,10 +14,10 @@ import scan_event as target
 def git_checkout(directory, files):
     for name, text in files.items():
         (directory / name).write_text(text)
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    environment = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
     for command in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "fixture"]):
-        subprocess.run(["git", "-C", str(directory), *command], check=True, env=env)
+        subprocess.run(["git", "-C", str(directory), *command], check=True, env=environment)
     return subprocess.run(["git", "-C", str(directory), "rev-parse", "HEAD"],
                           check=True, capture_output=True, text=True).stdout.strip()
 

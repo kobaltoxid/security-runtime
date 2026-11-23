@@ -19,7 +19,7 @@ from typing import Any
 SOURCE_TRIGGERS = {"push": "push", "schedule": "scheduled", "workflow_dispatch": "manual"}
 RELEASE_EVENTS = frozenset(("push", "release", "workflow_dispatch"))
 ECOSYSTEMS = frozenset(("npm", "go"))
-STREAM = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}")
+STREAM_PATTERN = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}")
 
 
 class InputError(ValueError):
@@ -32,7 +32,7 @@ def stream_name(prefix: str, name: str) -> str:
 
 
 def valid_stream(value: str) -> str:
-    if not STREAM.fullmatch(value):
+    if not STREAM_PATTERN.fullmatch(value):
         raise InputError("stream must be 1-128 lowercase letters, digits, '.', '_' or '-' and start alphanumeric")
     return value
 

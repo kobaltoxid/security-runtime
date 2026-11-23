@@ -5,7 +5,7 @@ import unittest
 
 from security_runtime import write_gate as gate
 
-REPO = "kobaltoxid/security-runtime-sandbox"
+REPOSITORY = "kobaltoxid/security-runtime-sandbox"
 HEAD = "a" * 40
 NOW = "2026-11-23T00:00:00+00:00"
 
@@ -23,7 +23,7 @@ class FakeGitHub:
         return {"state": self.state, "head_sha": self.head}
 
     def find_comment(self, repository, number, marker):
-        return next((c for c in self.comments if marker in c["body"]), None)
+        return next((comment for comment in self.comments if marker in comment["body"]), None)
 
     def create_comment(self, repository, number, body):
         comment = {"id": len(self.comments) + 1, "url": f"https://example.invalid/{len(self.comments) + 1}",
@@ -42,7 +42,7 @@ class WriteGateTests(unittest.TestCase):
         self.github = FakeGitHub()
 
     def request(self, body="Verdict: evidence supports the report.", pull_request=1):
-        return gate.propose(self.db, gate.comment_action(REPO, pull_request, HEAD, body), NOW)
+        return gate.propose(self.db, gate.comment_action(REPOSITORY, pull_request, HEAD, body), NOW)
 
     def test_comment_waits_for_approval(self):
         request = self.request()
@@ -104,7 +104,7 @@ class WriteGateTests(unittest.TestCase):
         self.assertEqual(len(self.github.comments), 1)
 
     def test_rejects_invalid_destinations(self):
-        for args in (("not-a-repo", 1, HEAD, "x"), (REPO, 0, HEAD, "x"), (REPO, 1, "abc", "x"), (REPO, 1, HEAD, " ")):
+        for args in (("not-a-repo", 1, HEAD, "x"), (REPOSITORY, 0, HEAD, "x"), (REPOSITORY, 1, "abc", "x"), (REPOSITORY, 1, HEAD, " ")):
             with self.subTest(args=args), self.assertRaises(gate.WriteGateError):
                 gate.comment_action(*args)
 
