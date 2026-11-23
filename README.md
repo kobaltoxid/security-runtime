@@ -12,4 +12,5 @@ Run `python3 main.py --help` to see the commands for scanning, watching a target
 - [Run a local scan](docs/monitor-a-target.md#run-a-scan)
 - [Review a flagged finding and resume an interrupted review](docs/triage-a-finding.md)
 - [Try the mock triage benchmark](docs/measure-triage-quality.md)
+- [Post an approved pull request comment](docs/post-an-approved-comment.md)
 - [Review loop design](docs/review-loop-design.md)

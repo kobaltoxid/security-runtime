@@ -23,12 +23,12 @@ Figure 1. Scan and triage path. Green: main path; dashed grey: model reply. See 
 2. **Request a review.** A maintainer selects a completed scan. The hosted workflow verifies the pull request commit and saved artifact before the triage worker selects one flagged finding. Claude can ask the runtime for the recorded checks or affected components, then return a verdict.
 3. **Check the evidence and verdict.** The runtime allows up to two evidence requests. It applies floop’s acceptance pattern by comparing the proposed verdict with the observed SecDepth checks for the selected finding. If the verdict misstates what those checks show, the runtime can ask for one correction using the same evidence. [floop](https://github.com/kobaltoxid/floop)
 4. **Save the verdict.** The worker stores each step and the final verdict in SQLite. If the checks are insufficient or the correction still fails the gate, the worker records `insufficient_evidence`. The runtime identifies a run by its input, model, provider, and policy version. Repeating a review with the same inputs and database resumes it or returns the stored verdict. [Triage a finding](triage-a-finding.md)
+5. **Post with approval.** A pull request comment waits for a person to approve its digest, which covers the repository, pull request, head commit, and body. Posting checks the digest and head again and never repeats a completed comment. [Post an approved comment](post-an-approved-comment.md)
 
 ## Planned additions
 
 The [private project board](https://github.com/users/kobaltoxid/projects/1) tracks the order, status, and completion criteria for the remaining work.
 
 - **Quality baseline.** Compare SecDepth alone, a one-shot review, and the gated loop on the same held-out, human-labeled findings. Report inconclusive cases beside accuracy. [Measure triage quality](measure-triage-quality.md)
-- **Gated writes.** A GitHub write, such as a PR comment, waits for an approval that becomes invalid if the destination or body changes.
 
 After the pilot, isolated regression fuzzing of code we own could add test and coverage evidence. A CI runner with persistent state is enough for the pilot. Kubernetes Jobs become useful when scans need a separate worker pool or stronger isolation.
