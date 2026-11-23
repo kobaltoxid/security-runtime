@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).parent / ".github" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / ".github" / "scripts"))
 import pr_scan_input as target
 
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import runtime
+from security_runtime import runtime
 
 
 SCANNER = """\

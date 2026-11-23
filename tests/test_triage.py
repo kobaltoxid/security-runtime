@@ -12,8 +12,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-import triage
-import triage_model
+from security_runtime import triage, triage_model
 
 
 INTERRUPTED_WORKER = """
@@ -21,7 +20,7 @@ import signal
 import sys
 from pathlib import Path
 
-import triage
+from security_runtime import triage
 
 ready = Path(sys.argv[1])
 calls = 0
@@ -123,7 +122,7 @@ class TriageTest(unittest.TestCase):
     def test_interruption_resumes_with_one_final_verdict(self):
         command = [sys.executable, "-B", "-c", INTERRUPTED_WORKER, str(self.ready), *self.args]
         with subprocess.Popen(
-            command, cwd=Path(__file__).resolve().parent,
+            command, cwd=Path(__file__).resolve().parent.parent,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         ) as worker:
             try:

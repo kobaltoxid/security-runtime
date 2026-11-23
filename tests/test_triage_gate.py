@@ -1,7 +1,7 @@
 import types
 import unittest
 
-import triage_gate
+from security_runtime import triage_gate
 
 
 def review(reachability="conditional", components=("pkg@1",)):

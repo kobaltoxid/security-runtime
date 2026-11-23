@@ -2,7 +2,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-import main
+from security_runtime import main
 
 
 class MainTests(unittest.TestCase):

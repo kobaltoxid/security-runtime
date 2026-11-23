@@ -11,4 +11,5 @@ Run `python3 main.py --help` to see the commands for scanning, watching a target
 - [Use the reusable GitHub Actions workflow](docs/monitor-a-target.md#run-on-github-actions)
 - [Run a local scan](docs/monitor-a-target.md#run-a-scan)
 - [Review a flagged finding and resume an interrupted review](docs/triage-a-finding.md)
+- [Try the mock triage benchmark](docs/measure-triage-quality.md)
 - [Review loop design](docs/review-loop-design.md)

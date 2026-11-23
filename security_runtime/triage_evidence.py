@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 
-from scan_reports import flagged_for_review
+from .scan_reports import flagged_for_review
 
 ACTIONS = {"inspect_checks", "inspect_components", "finish"}
 VERDICTS = {"evidence_supports_report", "evidence_conflicts_with_report", "insufficient_evidence"}
