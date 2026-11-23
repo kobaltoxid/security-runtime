@@ -172,7 +172,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kobaltoxid/secpeel
-          ref: 542c256ff386d6aa09f5bceeb21bc7823778ce5e
+          ref: ba33d3302cade8ab9b3b7a0c186bb90c75e0087d
           path: secpeel
           persist-credentials: false
 
