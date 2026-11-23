@@ -4,8 +4,24 @@ on:
   workflow_call:
     inputs:
       ecosystem:
-        description: Source dependency ecosystem to scan
-        required: true
+        description: Source dependency ecosystem to scan (npm or go). Not used for release scans.
+        required: false
+        default: ""
+        type: string
+      release-artifact:
+        description: Name of an artifact uploaded earlier in the calling run. Set it to scan a release build.
+        required: false
+        default: ""
+        type: string
+      release-file:
+        description: Path of the release file inside release-artifact.
+        required: false
+        default: ""
+        type: string
+      stream:
+        description: History stream. Defaults to branch-<branch> for source scans and release-<file name> for releases.
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -111,3 +127,123 @@ jobs:
           path: ${{ runner.temp }}/secdepth-results
           if-no-files-found: error
           retention-days: 7
+
+  history:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: secdepth-history-${{ github.repository }}-${{ inputs.stream != '' && inputs.stream || (inputs.release-file != '' && format('release-{0}', inputs.release-file) || github.ref_name) }}
+      cancel-in-progress: false
+    env:
+      STATE: ${{ runner.temp }}/secdepth-state
+    steps:
+      - name: Check out the target commit
+        if: ${{ inputs.release-file == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: target
+          persist-credentials: false
+
+      - name: Download the release build
+        if: ${{ inputs.release-file != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.release-artifact }}
+          path: ${{ runner.temp }}/release-input
+
+      - name: Check out security-runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: security-runtime
+          persist-credentials: false
+
+      - name: Check out SecDepth
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kobaltoxid/secdepth
+          ref: f371a9725cb17163d21b7390f3c5c1e811e6f005
+          path: secdepth
+          persist-credentials: false
+
+      - name: Check out secpeel
+        if: ${{ inputs.release-file != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kobaltoxid/secpeel
+          ref: 542c256ff386d6aa09f5bceeb21bc7823778ce5e
+          path: secpeel
+          persist-credentials: false
+
+      - name: Resolve the scan event
+        id: event
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          ECOSYSTEM: ${{ inputs.ecosystem }}
+          RELEASE_FILE: ${{ inputs.release-file }}
+          STREAM: ${{ inputs.stream }}
+        run: |
+          set -euo pipefail
+          args=(resolve --event "$EVENT_NAME" --stream "$STREAM" --github-output "$GITHUB_OUTPUT")
+          if test -n "$RELEASE_FILE"; then
+            args+=(--release-dir "$RUNNER_TEMP/release-input" --release-file "$RELEASE_FILE")
+          else
+            args+=(--source target --sha "$COMMIT_SHA" --ref-name "$REF_NAME" --ecosystem "$ECOSYSTEM")
+          fi
+          python3 security-runtime/.github/scripts/scan_event.py "${args[@]}"
+
+      - name: Restore stream history
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.STATE }}
+          key: secdepth-state-${{ steps.event.outputs.stream }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: secdepth-state-${{ steps.event.outputs.stream }}-
+
+      - name: Run the scan
+        id: scan
+        shell: bash
+        env:
+          TARGET: ${{ steps.event.outputs.target }}
+          STREAM: ${{ steps.event.outputs.stream }}
+          TRIGGER: ${{ steps.event.outputs.trigger }}
+          REVISION: ${{ steps.event.outputs.revision }}
+        run: |
+          set -euo pipefail
+          python_bin="$(command -v python3)"
+          # Expose Git and secpeel's read-only unpack and analysis tools. Exclude package managers and build tools.
+          scan_bin="$(mktemp -d "$RUNNER_TEMP/secdepth-bin.XXXXXX")"
+          for tool in git 7z zstd nm java unblob; do
+            if tool_path="$(command -v "$tool")"; then
+              ln -s "$tool_path" "$scan_bin/$tool"
+            fi
+          done
+          status=0
+          PATH="$scan_bin" "$python_bin" -E -s security-runtime/main.py scan "$TARGET" \
+            --state "$STATE" --stream "$STREAM" --trigger "$TRIGGER" --revision "$REVISION" \
+            > "$RUNNER_TEMP/runtime-summary.json" || status=$?
+          cat "$RUNNER_TEMP/runtime-summary.json"
+          python3 security-runtime/.github/scripts/scan_event.py summarize "$RUNNER_TEMP/runtime-summary.json" \
+            --state "$STATE" --github-output "$GITHUB_OUTPUT" --step-summary "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Save stream history
+        if: ${{ always() && steps.scan.outputs.run_id != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.STATE }}
+          key: secdepth-state-${{ steps.event.outputs.stream }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload SecDepth reports
+        if: ${{ always() && steps.scan.outputs.run_dir != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secdepth-${{ steps.event.outputs.stream }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.scan.outputs.run_dir }}
+          if-no-files-found: error
+          retention-days: 30
