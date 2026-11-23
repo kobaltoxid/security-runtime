@@ -135,8 +135,6 @@ jobs:
     concurrency:
       group: secdepth-history-${{ github.repository }}-${{ inputs.stream != '' && inputs.stream || (inputs.release-file != '' && format('release-{0}', inputs.release-file) || github.ref_name) }}
       cancel-in-progress: false
-    env:
-      STATE: ${{ runner.temp }}/secdepth-state
     steps:
       - name: Check out the target commit
         if: ${{ inputs.release-file == '' }}
@@ -201,7 +199,7 @@ jobs:
       - name: Restore stream history
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.STATE }}
+          path: ${{ runner.temp }}/secdepth-state
           key: secdepth-state-${{ steps.event.outputs.stream }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: secdepth-state-${{ steps.event.outputs.stream }}-
 
@@ -209,6 +207,7 @@ jobs:
         id: scan
         shell: bash
         env:
+          STATE: ${{ runner.temp }}/secdepth-state
           TARGET: ${{ steps.event.outputs.target }}
           STREAM: ${{ steps.event.outputs.stream }}
           TRIGGER: ${{ steps.event.outputs.trigger }}
@@ -236,7 +235,7 @@ jobs:
         if: ${{ always() && steps.scan.outputs.run_id != '' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.STATE }}
+          path: ${{ runner.temp }}/secdepth-state
           key: secdepth-state-${{ steps.event.outputs.stream }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload SecDepth reports
