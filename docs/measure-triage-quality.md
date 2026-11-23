@@ -43,36 +43,22 @@ PY
 
 For the SecDepth-only result, record a flagged finding as `insufficient_evidence`. The flag means SecDepth left it open for review.
 
-The existing gated worker runs from the repository root and uses one SQLite database per case. It invokes the authenticated personal `claude2` command, so it makes model calls. Capture its JSON output for each case and retain the scan directory and database with the benchmark records:
+For each flagged finding, add a case to `labels.json` with an `id`, `target_kind` (`source` or `artifact`), `expected_verdict`, the `scan_dir` that holds its saved scan, and its `advisory` ID. Use a distinct case ID for each finding and scan pair, even when two scans report the same advisory.
+
+Run the three approaches from the repository root. The runner reads each case's scan from the directory next to `labels.json` unless you pass `--cases-root`.
 
 ```sh
-mkdir -p .state/benchmark-runs
-finding_id=ADVISORY-ID
-case_id=source-example-01
-python3 main.py triage "$scan_dir" --provider claude2 \
-  --finding "$finding_id" \
-  --db ".state/benchmark-runs/$case_id.sqlite3" \
-  > ".state/benchmark-runs/$case_id.gated.json"
+python3 -m benchmarks.run path/to/labels.json --output .state/benchmark-runs
+python3 benchmarks/score.py path/to/labels.json .state/benchmark-runs/runs.json \
+  > .state/benchmark-runs/comparison.json
 ```
 
-Use a distinct case ID for each finding and scan pair, even when two scans report the same advisory. Read the captured `final.verdict` as `evidence_supports_report`, `evidence_conflicts_with_report`, or `insufficient_evidence`. Resume an interrupted worker with the same scan files and database.
+The runner makes model calls through the authenticated personal `claude2` command; pass `--provider` and `--model` to change them. Add `--limit 2` for a short trial run. Each approach works from the same saved scan:
 
-The real benchmark still needs human labels and a one-shot runner. When recording both model approaches, use the same model and saved evidence for each case.
+- **SecDepth alone** records every flagged finding as `insufficient_evidence`, because SecDepth left it open for review.
+- **One-shot review** sends the checks and affected components in one request and accepts the model's verdict without a correction.
+- **Gated review** runs the triage worker with its evidence requests, acceptance gate, and one correction. Its SQLite databases are kept in `gated/`.
 
-## Record and score results
+A verdict other than `insufficient_evidence` counts as an unsupported claim when the acceptance gate cannot verify it from the observed checks. The runner records cost as unknown because the model transport does not report it.
 
-Save `labels.json` with `schema_version: 1`, a nonblank `dataset_id`, and a `cases` array. Every case needs a unique `id`, a `target_kind` of `source` or `artifact`, and an `expected_verdict`.
-
-Save `runs.json` with the same schema version and dataset ID. Put complete result arrays under `runs.secdepth`, `runs.one_shot`, and `runs.gated`. Every result must contain the case `id`, its `verdict`, integer `unsupported_claims`, `elapsed_ms`, and `model_calls`, plus `cost_usd` as a decimal string or `null`.
-
-Run the scorer from the runtime checkout.
-
-```sh
-python3 benchmarks/score.py labels.json runs.json > comparison.json
-```
-
-Accuracy counts all labeled cases. Answered accuracy counts cases with a substantive verdict, so read it alongside the abstention count. Record elapsed time and model calls from each run. The scorer counts known prices separately so you can tell what the cost total covers.
-
-## Related
-
-- [Review loop design](review-loop-design.md)
+The runner saves each case's result in `cases/` as soon as it finishes. Run the same command again after an interruption, and it reuses the saved results instead of calling the model again.
