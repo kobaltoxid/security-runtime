@@ -116,7 +116,7 @@ jobs:
       release-file: app-linux.tar.gz
 ```
 
-The history job records the file's SHA-256 digest as the revision and uses the stream `release-<file name>`. SecDepth calls secpeel to identify the shipped components, and the saved run includes secpeel's `evidence.json`. Set `stream` to keep the same history when the file name includes a version. The scan can use Git, `7z`, `zstd`, `nm`, `java`, and `unblob` when the runner provides them; secpeel records any missing tool as a coverage gap.
+The history job records the file's SHA-256 digest as the revision and uses the stream `release-<file name>`. SecDepth calls secpeel to identify the shipped components, and the saved run includes secpeel's `evidence.json`. A scheduled run that builds and scans the release is recorded with the trigger `scheduled`, so it scans again even when the digest has not changed. Set `stream` to keep the same history when the file name includes a version. The scan can use Git, `7z`, `zstd`, `nm`, `java`, and `unblob` when the runner provides them; secpeel records any missing tool as a coverage gap.
 
 ### Where history is kept
 

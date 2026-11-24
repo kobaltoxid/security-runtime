@@ -79,6 +79,10 @@ class ResolveReleaseTests(unittest.TestCase):
         self.assertEqual(result["revision"], "sha256:" + hashlib.sha256(b"release bytes").hexdigest())
         self.assertEqual((result["stream"], result["trigger"]), ("release-app-linux.tar.gz", "release"))
 
+    def test_scheduled_release_scan_is_not_deduplicated(self):
+        result = target.resolve_release("schedule", self.artifact, "App-Linux.tar.gz")
+        self.assertEqual((result["stream"], result["trigger"]), ("release-app-linux.tar.gz", "scheduled"))
+
     def test_rejects_paths_outside_the_artifact(self):
         (self.root / "outside").write_bytes(b"x")
         for name in ("../outside", str(self.root / "outside"), "x\nstream=evil"):

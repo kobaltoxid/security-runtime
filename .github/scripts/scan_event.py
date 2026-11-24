@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 SOURCE_TRIGGERS = {"push": "push", "schedule": "scheduled", "workflow_dispatch": "manual"}
-RELEASE_EVENTS = frozenset(("push", "release", "workflow_dispatch"))
+RELEASE_TRIGGERS = {"push": "release", "release": "release", "workflow_dispatch": "release", "schedule": "scheduled"}
 ECOSYSTEMS = frozenset(("npm", "go"))
 STREAM_PATTERN = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}")
 
@@ -84,7 +84,7 @@ def resolve_source(event: str, ref_name: str, sha: str, source: Path, ecosystem:
 
 
 def resolve_release(event: str, release_dir: Path, release_file: str) -> dict[str, str]:
-    if event not in RELEASE_EVENTS:
+    if event not in RELEASE_TRIGGERS:
         raise InputError(f"release scans do not support the {event} event")
     if any(ord(char) < 32 or ord(char) == 127 for char in release_file):
         raise InputError("release-file must not contain control characters")
@@ -99,7 +99,7 @@ def resolve_release(event: str, release_dir: Path, release_file: str) -> dict[st
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
-    return {"stream": stream_name("release", relative.name), "trigger": "release",
+    return {"stream": stream_name("release", relative.name), "trigger": RELEASE_TRIGGERS[event],
             "revision": f"sha256:{digest.hexdigest()}", "target": str(path.resolve())}
 
 
